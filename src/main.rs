@@ -47,7 +47,10 @@ struct Cli {
     )]
     dry_run: bool,
 
-    #[arg(long, help = "Save dry-run output CSV to this path")]
+    #[arg(
+        long,
+        help = "Save dry-run output CSV to this path, only works with --dry-run"
+    )]
     output: Option<String>,
 }
 
