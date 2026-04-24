@@ -1,0 +1,46 @@
+name: account_import
+version: 1
+description: Load test accounts for contact reference lookup testing
+target:
+  object: Account
+  operation: insert
+
+options:
+  strict_headers: true
+
+fields:
+  - target: Name
+    type: column
+    source: "Account Name"
+    required: true
+
+  - target: AccountNumber
+    type: column
+    source: "Account Number"
+    required: true
+
+  - target: Phone
+    type: column
+    source: "Phone"
+
+  - target: Website
+    type: column
+    source: "Website"
+
+  - target: BillingCountry
+    type: formula
+    expr: if(eq(csv.Country, "UK"), "United Kingdom", if(eq(csv.Country, "US"), "United States", csv.Country))
+
+  - target: Type
+    type: formula
+    expr: "Customer"
+
+  - target: Description
+    type: formula
+    expr: |
+      concat(
+        "Bulk reference test account. Segment=",
+        csv.Segment,
+        ", Region=",
+        csv.Region
+      )

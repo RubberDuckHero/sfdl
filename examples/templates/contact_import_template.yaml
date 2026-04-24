@@ -1,0 +1,61 @@
+name: contact_import
+version: 1
+description: Load contacts and resolve account lookup
+target:
+  object: Contact
+  operation: insert
+
+options:
+  strict_headers: true
+  fail_on_lookup_ambiguity: true
+  fail_on_lookup_missing: true
+
+fields:
+  - target: FirstName
+    type: column
+    source: "First Name"
+    required: false
+
+  - target: LastName
+    type: column
+    source: "Last Name"
+    required: true
+
+  - target: Phone
+    type: column
+    source: "Phone"
+
+  - target: Email
+    type: formula
+    expr: lower(trim(csv.Email))
+
+  - target: LeadSource
+    type: formula
+    expr: '"Data Load"'
+
+  - target: Description
+    type: formula
+    expr: |
+      concat (
+        "Imported from CSV. Country=",
+        csv.Country,
+        ", Annual Spend=",
+        csv["Annual Spend"]
+      )
+
+  - target: MailingCountry
+    type: formula
+    expr: if(eq(csv.Country, "UK"), "United Kingdom", if(eq(csv.Country, "US"), "United States", csv.Country))
+
+  - target: AccountId
+    type: reference
+    lookup:
+      object: Account
+      strategy: first_match
+      match_rules:
+        - field: AccountNumber
+          value: trim(csv["Account Number"])
+        - field: Name
+          value: trim(csv["Account Name"])
+      on_missing: error
+      on_multiple: error

@@ -1,0 +1,21 @@
+Account Number,Account Name,Phone,Website,Country,Segment,Region
+ACCT-1001,Acme Corp,020-7000-1001,https://acme-corp.example.com,Ireland,Commercial,EMEA
+ACCT-1002,Global Media,020-7000-1002,https://global-media.example.com,Australia,SMB,APAC
+ACCT-1003,Northstar Systems,020-7000-1003,https://northstar-systems.example.com,Canada,Public Sector,North America
+ACCT-1004,Blue Ridge Consulting,020-7000-1004,https://blue-ridge-consulting.example.com,France,Enterprise,EMEA
+ACCT-1005,Vertex Manufacturing,020-7000-1005,https://vertex-manufacturing.example.com,UK,Commercial,APAC
+ACCT-1006,Summit Retail,020-7000-1006,https://summit-retail.example.com,Germany,SMB,North America
+ACCT-1007,Pioneer Logistics,020-7000-1007,https://pioneer-logistics.example.com,US,Public Sector,EMEA
+ACCT-1008,Brightline Software,020-7000-1008,https://brightline-software.example.com,Ireland,Enterprise,APAC
+ACCT-1009,Oak & Stone Ltd,020-7000-1009,https://oak-and-stone-ltd.example.com,Australia,Commercial,North America
+ACCT-1010,Riverbend Finance,020-7000-1010,https://riverbend-finance.example.com,Canada,SMB,EMEA
+ACCT-1011,Atlas Healthcare,020-7000-1011,https://atlas-healthcare.example.com,France,Public Sector,APAC
+ACCT-1012,Cedar Grove Energy,020-7000-1012,https://cedar-grove-energy.example.com,UK,Enterprise,North America
+ACCT-1013,Horizon Education,020-7000-1013,https://horizon-education.example.com,Germany,Commercial,EMEA
+ACCT-1014,Silverline Telecom,020-7000-1014,https://silverline-telecom.example.com,US,SMB,APAC
+ACCT-1015,Redwood Partners,020-7000-1015,https://redwood-partners.example.com,Ireland,Public Sector,North America
+ACCT-1016,Maple Leaf Foods,020-7000-1016,https://maple-leaf-foods.example.com,Australia,Enterprise,EMEA
+ACCT-1017,Urban Peak Design,020-7000-1017,https://urban-peak-design.example.com,Canada,Commercial,APAC
+ACCT-1018,Keystone Services,020-7000-1018,https://keystone-services.example.com,France,SMB,North America
+ACCT-1019,Lighthouse Labs,020-7000-1019,https://lighthouse-labs.example.com,UK,Public Sector,EMEA
+ACCT-1020,Evergreen Markets,020-7000-1020,https://evergreen-markets.example.com,Germany,Enterprise,APAC
