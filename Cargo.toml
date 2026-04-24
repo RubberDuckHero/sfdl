@@ -1,0 +1,13 @@
+[package]
+name = "sfdl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version="4", features=["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+yaml_serde = "0.10"
+csv = "1"
+indicatif = "0.17"
+tempfile = "3"
