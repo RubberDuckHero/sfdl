@@ -139,6 +139,18 @@ struct SfBulkResult {
 
     #[serde(default, rename = "numberRecordsFailed")]
     number_records_failed: Option<u64>,
+
+    #[serde(default, rename = "processedRecords")]
+    processed_records: Option<u64>,
+
+    #[serde(default, rename = "failedRecords")]
+    failed_records: Option<u64>,
+
+    #[serde(default, rename = "successfulResults")]
+    successful_results: Option<u64>,
+
+    #[serde(default, rename = "failedResults")]
+    failed_results: Option<u64>,
 }
 
 // Shared types
@@ -311,7 +323,9 @@ fn write_objects_to_csv<W: Write>(
     objects: &[OutputObject],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let headers = output_headers(objects);
-    let mut writer = csv::Writer::from_writer(writer);
+    let mut writer = csv::WriterBuilder::new()
+        .terminator(csv::Terminator::CRLF)
+        .from_writer(writer);
 
     writer.write_record(&headers)?;
 
@@ -544,11 +558,21 @@ fn resolve_reference(
 
 // Salesforce CLI
 
+fn sf_command() -> Command {
+    if cfg!(windows) {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg("sf");
+        cmd
+    } else {
+        Command::new("sf")
+    }
+}
+
 fn call_salesforce_query(
     org: &str,
     soql: &str,
 ) -> Result<SfCliQueryOutput, Box<dyn std::error::Error>> {
-    let output = Command::new("sf")
+    let output = sf_command()
         .arg("data")
         .arg("query")
         .arg("--target-org")
@@ -629,7 +653,7 @@ fn call_salesforce_bulk_operation(
         }
     };
 
-    let output = Command::new("sf")
+    let output = sf_command()
         .arg("data")
         .arg(command_operation)
         .arg("bulk")
@@ -637,6 +661,8 @@ fn call_salesforce_bulk_operation(
         .arg(csv_path)
         .arg("--sobject")
         .arg(object)
+        .arg("--line-ending")
+        .arg("CRLF")
         .arg("--wait")
         .arg("10")
         .arg("--target-org")
@@ -695,8 +721,19 @@ fn call_salesforce_bulk_operation(
 
     let bulk_output: SfBulkOutput = serde_json::from_str(&stdout)?;
 
-    let processed = bulk_output.result.number_records_processed.unwrap_or(0);
-    let failed = bulk_output.result.number_records_failed.unwrap_or(0);
+    let processed = bulk_output
+        .result
+        .number_records_processed
+        .or(bulk_output.result.processed_records)
+        .or(bulk_output.result.successful_results)
+        .unwrap_or(0);
+
+    let failed = bulk_output
+        .result
+        .number_records_failed
+        .or(bulk_output.result.failed_records)
+        .or(bulk_output.result.failed_results)
+        .unwrap_or(0);
 
     if failed > 0 {
         spinner.finish_and_clear();
@@ -739,7 +776,7 @@ fn download_failed_bulk_results(
 
     let endpoint = format!("/services/data/v60.0/jobs/ingest/{}/failedResults", job_id);
 
-    let output = Command::new("sf")
+    let output = sf_command()
         .arg("org")
         .arg("display")
         .arg("--target-org")
