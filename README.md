@@ -273,6 +273,7 @@ Check:
 - Formula engine
 - Bulk API integration
 - Automatic error export
+- Excel data extraction
 
 ---
 
