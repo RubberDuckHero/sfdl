@@ -198,7 +198,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     print_banner();
 
     let template_config = read_template(&cli.template)?;
-    //let rows = read_csv(&cli.data, &template_config)?;
     let rows = read_data_file(&cli.data, cli.sheet.as_deref(), &template_config)?;
     let lookup_cache = build_lookup_cache(&template_config, &rows, &cli.org)?;
     let objects = build_objects(&template_config, &rows, &lookup_cache)?;
