@@ -1,3 +1,4 @@
+use calamine::{open_workbook_auto, Data, Reader};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
@@ -34,8 +35,11 @@ struct Cli {
     #[arg(long, short = 't', help = "Path to template YAML file")]
     template: String,
 
-    #[arg(long, short = 'd', help = "Path to CSV data file")]
+    #[arg(long, short = 'd', help = "Path to data file")]
     data: String,
+
+    #[arg(long, short = 's', help = "Worksheet name when reading Excel files")]
+    sheet: Option<String>,
 
     #[arg(long, short = 'o', help = "Salesforce org alias or username")]
     org: String,
@@ -194,7 +198,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     print_banner();
 
     let template_config = read_template(&cli.template)?;
-    let rows = read_csv(&cli.data, &template_config)?;
+    //let rows = read_csv(&cli.data, &template_config)?;
+    let rows = read_data_file(&cli.data, cli.sheet.as_deref(), &template_config)?;
     let lookup_cache = build_lookup_cache(&template_config, &rows, &cli.org)?;
     let objects = build_objects(&template_config, &rows, &lookup_cache)?;
 
@@ -233,6 +238,30 @@ fn read_template(path: &str) -> Result<TemplateConfig, Box<dyn std::error::Error
     let template_text = std::fs::read_to_string(path)?;
     let template_config = yaml_serde::from_str(&template_text)?;
     Ok(template_config)
+}
+
+// Data Read
+
+fn read_data_file(
+    path: &str,
+    sheet: Option<&str>,
+    template_config: &TemplateConfig,
+) -> Result<Vec<CsvRow>, Box<dyn std::error::Error>> {
+    let extension = std::path::Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    match extension.as_str() {
+        "csv" => read_csv(path, template_config),
+        "xls" | "xlsx" | "xlsm" | "xlsb" | "ods" => read_excel(path, sheet, template_config),
+        other => Err(format!(
+            "Unsupported data file extension '{}'. Use .csv .xls .xlsx .xlsm .xlsb or .ods",
+            other
+        )
+        .into()),
+    }
 }
 
 // Object building
@@ -383,6 +412,94 @@ fn error_output_path(input_path: &str) -> String {
         .join(format!("{}_ERRORS.csv", stem))
         .to_string_lossy()
         .to_string()
+}
+
+// Excel
+
+fn read_excel(
+    path: &str,
+    sheet: Option<&str>,
+    template_config: &TemplateConfig,
+) -> Result<Vec<CsvRow>, Box<dyn std::error::Error>> {
+    let mut workbook = open_workbook_auto(path)?;
+
+    let sheet_name = match sheet {
+        Some(name) => name.to_string(),
+        None => workbook
+            .sheet_names()
+            .first()
+            .ok_or("Workbook has no sheets")?
+            .to_string(),
+    };
+
+    let range = workbook.worksheet_range(&sheet_name)?;
+
+    let mut rows_iter = range.rows();
+
+    let header_row = rows_iter
+        .next()
+        .ok_or_else(|| format!("Sheet '{}' is empty", sheet_name))?;
+
+    let headers = header_row
+        .iter()
+        .map(excel_cell_to_string)
+        .collect::<Vec<_>>();
+
+    if template_config.options.strict_headers {
+        for field in &template_config.fields {
+            if let TemplateField::Column { source, .. } = field {
+                if !headers.iter().any(|h| h == source) {
+                    return Err(format!(
+                        "Missing Excel column '{}' in sheet '{}'",
+                        source, sheet_name
+                    )
+                    .into());
+                }
+            }
+        }
+    }
+
+    let mut rows = Vec::new();
+
+    for row in rows_iter {
+        let mut map = HashMap::new();
+
+        for (index, header) in headers.iter().enumerate() {
+            if header.trim().is_empty() {
+                continue;
+            }
+
+            let value = row.get(index).map(excel_cell_to_string).unwrap_or_default();
+
+            map.insert(header.clone(), value);
+        }
+
+        if map.values().any(|value| !value.trim().is_empty()) {
+            rows.push(map);
+        }
+    }
+
+    Ok(rows)
+}
+
+fn excel_cell_to_string(cell: &Data) -> String {
+    match cell {
+        Data::Empty => String::new(),
+        Data::String(s) => s.trim().to_string(),
+        Data::Float(n) => {
+            if n.fract() == 0.0 {
+                format!("{:.0}", n)
+            } else {
+                n.to_string()
+            }
+        }
+        Data::Int(n) => n.to_string(),
+        Data::Bool(b) => b.to_string(),
+        Data::Error(e) => format!("{:?}", e),
+        Data::DateTime(dt) => dt.to_string(),
+        Data::DateTimeIso(s) => s.clone(),
+        Data::DurationIso(s) => s.clone(),
+    }
 }
 
 // Lookup handling
