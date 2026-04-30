@@ -108,6 +108,8 @@ struct TemplateLookup {
     match_rules: Vec<TemplateMatchRule>,
     on_missing: String,
     on_multiple: String,
+    #[serde(default)]
+    order_by: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +165,7 @@ struct SfBulkResult {
 // Shared types
 
 type CsvRow = HashMap<String, String>;
+type SkippedRow = CsvRow;
 type OutputObject = HashMap<String, String>;
 
 #[derive(Debug, Clone)]
@@ -201,6 +204,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let rows = read_data_file(&cli.data, cli.sheet.as_deref(), &template_config)?;
     let lookup_cache = build_lookup_cache(&template_config, &rows, &cli.org)?;
     let objects = build_objects(&template_config, &rows, &lookup_cache)?;
+
+    let removed_output_path = removed_output_path(&cli.data);
+    let (objects, removed_rows) = split_missing_id_updates(&template_config, rows, objects);
+
+    if !removed_rows.is_empty() {
+        save_rows_as_csv(&removed_rows, &removed_output_path)?;
+        println!(
+            "Skipped {} update row(s) with no Id. Removed rows saved to: {}",
+            removed_rows.len(),
+            removed_output_path
+        );
+    }
 
     print_load_summary(&template_config, objects.len());
 
@@ -413,6 +428,50 @@ fn error_output_path(input_path: &str) -> String {
         .to_string()
 }
 
+fn removed_output_path(input_path: &str) -> String {
+    let path = std::path::Path::new(input_path);
+
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("output");
+
+    let parent = path.parent().unwrap_or_else(|| std::path::Path::new(""));
+
+    parent
+        .join(format!("{}_REMOVED.csv", stem))
+        .to_string_lossy()
+        .to_string()
+}
+
+fn split_missing_id_updates(
+    template_config: &TemplateConfig,
+    rows: Vec<CsvRow>,
+    objects: Vec<OutputObject>,
+) -> (Vec<OutputObject>, Vec<SkippedRow>) {
+    if template_config.target.operation != "update" {
+        return (objects, Vec::new());
+    }
+
+    let mut loadable_objects = Vec::new();
+    let mut removed_rows = Vec::new();
+
+    for (row, object) in rows.into_iter().zip(objects.into_iter()) {
+        let has_id = object
+            .get("Id")
+            .map(|id| !id.trim().is_empty())
+            .unwrap_or(false);
+
+        if has_id {
+            loadable_objects.push(object);
+        } else {
+            removed_rows.push(row);
+        }
+    }
+
+    (loadable_objects, removed_rows)
+}
+
 // Excel
 
 fn read_excel(
@@ -501,6 +560,34 @@ fn excel_cell_to_string(cell: &Data) -> String {
     }
 }
 
+fn save_rows_as_csv(
+    rows: &[CsvRow],
+    path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut headers: Vec<String> = rows.iter().flat_map(|row| row.keys().cloned()).collect();
+    headers.sort();
+    headers.dedup();
+
+    let file = std::fs::File::create(path)?;
+    let mut writer = csv::WriterBuilder::new()
+        .terminator(csv::Terminator::CRLF)
+        .from_writer(file);
+
+    writer.write_record(&headers)?;
+
+    for row in rows {
+        let record = headers
+            .iter()
+            .map(|header| row.get(header).map(String::as_str).unwrap_or(""))
+            .collect::<Vec<_>>();
+
+        writer.write_record(record)?;
+    }
+
+    writer.flush()?;
+    Ok(())
+}
+
 // Lookup handling
 
 fn build_lookup_cache(
@@ -530,7 +617,11 @@ fn build_lookup_cache(
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            let soql = format!("SELECT Id, {field} FROM {object} WHERE {field} IN ({in_list})");
+            let mut soql = format!("SELECT Id, {field} FROM {object} WHERE {field} IN ({in_list})");
+            if let Some(order_by) = lookup_order_by(template_config, &object, &field) {
+                soql.push_str(" ORDER BY ");
+                soql.push_str(&order_by);
+            }
             let result = call_salesforce_query(org, &soql);
 
             match result {
@@ -569,6 +660,32 @@ fn build_lookup_cache(
     }
 
     Ok(cache)
+}
+
+fn lookup_order_by(
+    template_config: &TemplateConfig,
+    object: &str,
+    field: &str,
+) -> Option<String> {
+    for template_field in &template_config.fields {
+        let TemplateField::Reference { lookup, .. } = template_field else {
+            continue;
+        };
+
+        if lookup.object != object {
+            continue;
+        }
+
+        if lookup
+            .match_rules
+            .iter()
+            .any(|rule| rule.field == field)
+        {
+            return lookup.order_by.clone();
+        }
+    }
+
+    None
 }
 
 fn collect_lookup_values(
@@ -652,15 +769,17 @@ fn resolve_reference(
                         lookup.object, rule.field, value
                     ));
                 }
-
-                if lookup.strategy == "first_match" {
-                    return Ok(Some(matches[0].clone()));
+                
+                match lookup.strategy.as_str() {
+                    "first_match" => return Ok(Some(matches[0].clone())),
+                    "last_match" => return Ok(Some(matches[matches.len() - 1].clone())),
+                    _ => {
+                        return Err(format!(
+                            "Multiple matches found but unsupported strategy '{}'",
+                            lookup.strategy
+                        ));
+                    }
                 }
-
-                return Err(format!(
-                    "Multiple matches found but unsupported strategy '{}'",
-                    lookup.strategy
-                ));
             }
         }
     }
@@ -728,7 +847,7 @@ fn load_objects_to_salesforce(
         return Ok(());
     }
 
-    validate_operation_requirements(template_config, objects)?;
+    validate_operation_requirements(template_config)?;
 
     let mut temp_file = NamedTempFile::new()?;
     write_objects_to_csv(temp_file.as_file_mut(), objects)?;
@@ -966,24 +1085,11 @@ fn soql_string(value: &str) -> String {
 
 fn validate_operation_requirements(
     template_config: &TemplateConfig,
-    objects: &[OutputObject],
 ) -> Result<(), Box<dyn std::error::Error>> {
     match template_config.target.operation.as_str() {
         "insert" => Ok(()),
 
-        "update" => {
-            for (index, object) in objects.iter().enumerate() {
-                if object.get("Id").map(|v| v.trim()).unwrap_or("").is_empty() {
-                    return Err(format!(
-                        "Row {}: update requires an Id field. Add a reference field with target: Id.",
-                        index + 2
-                    )
-                    .into());
-                }
-            }
-
-            Ok(())
-        }
+        "update" => Ok(()),
 
         other => Err(format!("Unsupported operation '{}'. Use insert or update.", other).into()),
     }
