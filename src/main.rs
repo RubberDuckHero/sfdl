@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 use std::process::{Command, Stdio};
 use tempfile::NamedTempFile;
+use chrono::{Duration, Local, NaiveDate};
 
 // CLI
 
@@ -172,6 +173,8 @@ type OutputObject = HashMap<String, String>;
 enum FormulaValue {
     String(String),
     Bool(bool),
+    Date(NaiveDate),
+    Number(i64),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1102,6 +1105,8 @@ impl FormulaValue {
         match self {
             FormulaValue::String(s) => s,
             FormulaValue::Bool(b) => b.to_string(),
+            FormulaValue::Date(d) => d.format("%Y-%m-%d").to_string(),
+            FormulaValue::Number(n) => n.to_string(),
         }
     }
 
@@ -1109,13 +1114,29 @@ impl FormulaValue {
         match self {
             FormulaValue::String(s) => Ok(s),
             FormulaValue::Bool(_) => Err("expected string".to_string()),
+            FormulaValue::Date(d) => Ok(d.format("%Y-%m-%d").to_string()),
+            FormulaValue::Number(n) => Ok(n.to_string()),
         }
     }
 
     fn expect_bool(self) -> Result<bool, String> {
         match self {
-            FormulaValue::Bool(b) => Ok(b),
             FormulaValue::String(_) => Err("expected bool".to_string()),
+            FormulaValue::Bool(b) => Ok(b),
+            FormulaValue::Date(_) => Err("expected bool".to_string()),
+            FormulaValue::Number(_) => Err("expected bool".to_string()),
+        }
+    }
+
+    fn expect_number(self) -> Result<i64, String> {
+        match self {
+            FormulaValue::String(s) => s
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| format!("expected number, got '{}'", s)),
+            FormulaValue::Bool(_) => Err("expected number".to_string()),
+            FormulaValue::Date(_) => Err("expected number".to_string()),
+            FormulaValue::Number(n) => Ok(n),
         }
     }
 }
@@ -1143,10 +1164,17 @@ fn eval_formula(expr: &str, row: &CsvRow) -> Result<String, String> {
 }
 
 fn is_plain_literal(expr: &str) -> bool {
-    !expr.contains('(')
-        && !expr.starts_with("csv.")
-        && !expr.starts_with("csv[")
-        && !expr.starts_with('"')
+    let trimmed = expr.trim();
+    let upper = trimmed.to_ascii_uppercase();
+
+    if upper == "TODAY" || upper.starts_with("TODAY +") || upper.starts_with("TODAY+") {
+        return false;
+    }
+
+    !trimmed.contains('(')
+        && !trimmed.starts_with("csv.")
+        && !trimmed.starts_with("csv[")
+        && !trimmed.starts_with('"')
 }
 
 struct FormulaParser<'a> {
@@ -1161,10 +1189,35 @@ impl<'a> FormulaParser<'a> {
     }
 
     fn parse_expr(&mut self) -> Result<FormulaValue, String> {
+        self.parse_additive()
+    }
+
+    fn parse_additive(&mut self) -> Result<FormulaValue, String> {
+        let mut left = self.parse_primary()?;
+
+        loop {
+            self.skip_ws();
+
+            if !self.consume_char('+') {
+                break;
+            }
+
+            let right = self.parse_primary()?;
+            left = self.eval_plus(left, right)?;
+        }
+
+        Ok(left)
+    }
+
+    fn parse_primary(&mut self) -> Result<FormulaValue, String> {
         self.skip_ws();
 
         if self.peek_char() == Some('"') {
             return Ok(FormulaValue::String(self.parse_string()?));
+        }
+
+        if self.peek_char().is_some_and(|ch| ch == '-' || ch.is_ascii_digit()) {
+            return Ok(FormulaValue::Number(self.parse_number()?));
         }
 
         let ident = self.parse_ident()?;
@@ -1180,7 +1233,65 @@ impl<'a> FormulaParser<'a> {
             return self.eval_function(&ident, args);
         }
 
+        if ident.eq_ignore_ascii_case("TODAY") {
+            return Ok(FormulaValue::Date(Local::now().date_naive()));
+        }
+
         Ok(FormulaValue::String(ident))
+    }
+
+    fn eval_plus(
+        &self,
+        left: FormulaValue,
+        right: FormulaValue,
+    ) -> Result<FormulaValue, String> {
+        match left {
+            FormulaValue::Date(date) => {
+                let days = right.expect_number()?;
+                Ok(FormulaValue::Date(date + Duration::days(days)))
+            }
+
+            FormulaValue::Number(days) => match right {
+                FormulaValue::Date(date) => Ok(FormulaValue::Date(date + Duration::days(days))),
+                other => Err(format!(
+                    "unsupported + operation between number and {}",
+                    formula_type_name(&other)
+                )),
+            },
+
+            other => Err(format!(
+                "unsupported + operation starting with {}",
+                formula_type_name(&other)
+            )),
+        }
+    }
+
+    fn parse_number(&mut self) -> Result<i64, String> {
+        self.skip_ws();
+
+        let start = self.pos;
+
+        if self.peek_char() == Some('-') {
+            self.next_char();
+        }
+
+        let digit_start = self.pos;
+
+        while let Some(ch) = self.peek_char() {
+            if ch.is_ascii_digit() {
+                self.next_char();
+            } else {
+                break;
+            }
+        }
+
+        if self.pos == digit_start {
+            return Err(format!("expected number near '{}'", self.remaining()));
+        }
+
+        self.input[start..self.pos]
+            .parse::<i64>()
+            .map_err(|_| format!("invalid number '{}'", &self.input[start..self.pos]))
     }
 
     fn parse_args(&mut self) -> Result<Vec<FormulaValue>, String> {
@@ -1212,7 +1323,9 @@ impl<'a> FormulaParser<'a> {
     }
 
     fn eval_function(&self, name: &str, args: Vec<FormulaValue>) -> Result<FormulaValue, String> {
-        match name {
+        let function_name = name.to_ascii_lowercase();
+
+        match function_name.as_str() {
             "trim" => {
                 expect_arg_count(name, &args, 1)?;
                 Ok(FormulaValue::String(
@@ -1256,6 +1369,11 @@ impl<'a> FormulaParser<'a> {
                 } else {
                     Ok(args[2].clone())
                 }
+            }
+
+            "today" => {
+                expect_arg_count(name, &args, 0)?;
+                Ok(FormulaValue::Date(Local::now().date_naive()))
             }
 
             _ => Err(format!("unknown function '{}'", name)),
@@ -1369,6 +1487,15 @@ impl<'a> FormulaParser<'a> {
 
     fn remaining(&self) -> &str {
         &self.input[self.pos..]
+    }
+}
+
+fn formula_type_name(value: &FormulaValue) -> &'static str {
+    match value {
+        FormulaValue::String(_) => "string",
+        FormulaValue::Bool(_) => "bool",
+        FormulaValue::Date(_) => "date",
+        FormulaValue::Number(_) => "number",
     }
 }
 

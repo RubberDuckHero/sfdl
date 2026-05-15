@@ -143,6 +143,8 @@ csv["Account Name"]
 | concat(a,b,...) | join strings |
 | eq(a,b) | equality |
 | if(cond,a,b) | conditional |
+| TODAY | todays date YYYY-MM-DD |
+| TODAY + x | date relative to today YYYY-MM-DD |
 
 ---
 
