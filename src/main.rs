@@ -80,6 +80,7 @@ struct TemplateTarget {
 #[derive(Debug, Deserialize)]
 struct TemplateOptions {
     strict_headers: bool,
+    batch_size: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -603,10 +604,10 @@ fn build_lookup_cache(
 
     let mut cache: HashMap<LookupCacheKey, Vec<String>> = HashMap::new();
 
-    const BATCH_SIZE: usize = 100;
+    let batch_size = template_config.options.batch_size.unwrap_or(100);
 
     for ((object, field), values) in grouped {
-        for batch in values.chunks(BATCH_SIZE) {
+        for batch in values.chunks(batch_size) {
             let spinner = start_spinner(&format!(
                 "Querying {}.{} ({} values)",
                 object,
