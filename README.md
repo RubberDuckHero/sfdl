@@ -2,14 +2,7 @@
 
 Salesforce Template Based Data Loader.
 
-`sfdl` loads CSV data into Salesforce using a YAML template. It supports:
-
-- Column mappings
-- Formula transformations
-- Reference lookups (cached + batched)
-- Dry-run previews
-- Bulk insert/update via Salesforce CLI
-- Automatic failed row export
+`sfdl` loads CSV data into Salesforce using a YAML template.
 
 ---
 
@@ -23,43 +16,6 @@ Dry run:
 
 ```bash
 sfdl -t template.yaml -d data.csv -o my-org --dry-run
-```
-
----
-
-# Prerequisites
-
-- Rust + Cargo
-- Salesforce CLI (`sf`)
-- Authenticated Salesforce org
-
----
-
-# Install Rust (Windows via winget)
-
-```powershell
-winget install Rustlang.Rustup
-```
-
-Then restart your terminal and verify:
-
-```powershell
-rustc --version
-cargo --version
-```
-
----
-
-# Build
-
-```bash
-cargo build --release
-```
-
-Binary:
-
-```
-target/release/sfdl
 ```
 
 ---
@@ -148,64 +104,6 @@ csv["Account Name"]
 
 ---
 
-# Processing Pipeline
-
-```
-        CSV File
-           │
-           ▼
-   Read & Validate Headers
-           │
-           ▼
-     Build Lookup Keys
-           │
-           ▼
-  Batch Salesforce Queries
-           │
-           ▼
-    Build Lookup Cache
-           │
-           ▼
-   Apply Formulas + Columns
-           │
-           ▼
-      Build Objects
-           │
-           ▼
-     Confirm / Dry Run
-           │
-           ▼
-   Bulk API Load (sf CLI)
-           │
-           ▼
-   Success or Error CSV
-```
-
----
-
-# Lookup Flow
-
-```
-CSV Values
-   │
-   ▼
-Extract Unique Values
-   │
-   ▼
-Batch (100 per query)
-   │
-   ▼
-SOQL Query
-   │
-   ▼
-Cache Results
-   │
-   ▼
-Resolve per Row
-```
-
----
-
 # Error Handling
 
 If ANY rows fail:
@@ -264,18 +162,6 @@ Check:
 ```
 <input>_ERRORS.csv
 ```
-
----
-
-# Features Summary
-
-- YAML-driven mapping
-- Dry-run preview
-- Batched lookups
-- Formula engine
-- Bulk API integration
-- Automatic error export
-- Excel data extraction
 
 ---
 
